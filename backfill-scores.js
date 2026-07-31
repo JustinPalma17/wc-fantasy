@@ -48,12 +48,19 @@ async function apiGet(path) {
   return json.response || [];
 }
 
+function buildFirebaseUrl(path) {
+  const url = new URL(FIREBASE_DB_URL);
+  const basePath = url.pathname.replace(/\/$/, "");
+  url.pathname = `${basePath}/${path}.json`;
+  return url.toString();
+}
+
 function firebaseGetUrl() {
-  return `${FIREBASE_DB_URL.replace(/\/$/, "")}/${DATA_PATH}.json`;
+  return buildFirebaseUrl(DATA_PATH);
 }
 
 function firebaseGameweekUrl(gw) {
-  return `${FIREBASE_DB_URL.replace(/\/$/, "")}/${DATA_PATH}/gameweeks/${gw}.json`;
+  return buildFirebaseUrl(`${DATA_PATH}/gameweeks/${gw}`);
 }
 
 async function fetchCurrentState() {
