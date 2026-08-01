@@ -2,15 +2,8 @@ name: Update World Cup Fantasy Scores
 
 on:
   schedule:
-    # Runs every 30 minutes between 11:00–23:59 UTC.
-    # Adjust this window to match actual World Cup kickoff times in UTC.
-    # Budget check: worst case ~2 fixtures live at once, polled every 30 min
-    # over a 13-hour window = 26 polls/day. Each poll = 1 call for the live
-    # list + 1 call per live fixture for player stats. Even with 2 concurrent
-    # matches that's 26 * 3 = 78 calls/day — comfortably under the 100/day
-    # free tier cap, with room left for manual runs.
-    - cron: "*/30 11-23 * * *"
-  workflow_dispatch: {} # lets you trigger it manually from the Actions tab
+    - cron: "*/5 * * * *"   # keep your existing schedule — adjust as needed
+  workflow_dispatch: {}      # optional: lets you trigger it manually from the Actions tab
 
 jobs:
   update-scores:
@@ -22,11 +15,15 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "24"   # matches what GitHub is already forcing your runs onto
+
+      - name: Install dependencies
+        run: npm install firebase-admin
 
       - name: Run score update script
+        run: node update-scores.js
         env:
           API_FOOTBALL_KEY: ${{ secrets.API_FOOTBALL_KEY }}
           FIREBASE_DB_URL: ${{ secrets.FIREBASE_DB_URL }}
-          CURRENT_GW: "1" # bump this manually as the tournament progresses
-        run: node update-scores.js
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          CURRENT_GW: ${{ vars.CURRENT_GW }}   # optional, only if you use a repo variable for this
