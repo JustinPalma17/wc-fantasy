@@ -8,13 +8,24 @@
  * numbers appear in the Gameweek Stats tab as if you'd typed them.
  *
  * Run with: node update-scores.js
- * Requires env vars: API_FOOTBALL_KEY, FIREBASE_DB_URL
+ * Requires env vars: API_FOOTBALL_KEY, FIREBASE_DB_URL, FIREBASE_SERVICE_ACCOUNT
  * Optional env var: CURRENT_GW (defaults to 1)
+ *
+ * NOTE ON AUTH: this script uses the Firebase Admin SDK with a service
+ * account, which bypasses Realtime Database security rules entirely.
+ * That means your rules (e.g. locking /users/$uid down to its own
+ * owner) stay intact for your real front-end users, while this bot
+ * still has full read/write access to the shared league data. Do NOT
+ * switch this back to plain fetch() calls against the REST API unless
+ * you also add matching rules + an ID token for those requests.
  * --------------------------------------------------------------
  */
 
+const admin = require("firebase-admin");
+
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
+const FIREBASE_SERVICE_ACCOUNT = process.env.FIREBASE_SERVICE_ACCOUNT;
 const DATA_PATH = "wc_fantasy_league_v1";
 const CURRENT_GW = process.env.CURRENT_GW || "1";
 
@@ -23,10 +34,27 @@ const CURRENT_GW = process.env.CURRENT_GW || "1";
 const LEAGUE_ID = 1;
 const SEASON = 2026;
 
-if (!API_FOOTBALL_KEY || !FIREBASE_DB_URL) {
-  console.error("Missing API_FOOTBALL_KEY or FIREBASE_DB_URL env vars.");
+if (!API_FOOTBALL_KEY || !FIREBASE_DB_URL || !FIREBASE_SERVICE_ACCOUNT) {
+  console.error(
+    "Missing API_FOOTBALL_KEY, FIREBASE_DB_URL, or FIREBASE_SERVICE_ACCOUNT env vars."
+  );
   process.exit(1);
 }
+
+let serviceAccount;
+try {
+  serviceAccount = JSON.parse(FIREBASE_SERVICE_ACCOUNT);
+} catch (err) {
+  console.error("FIREBASE_SERVICE_ACCOUNT is not valid JSON:", err.message);
+  process.exit(1);
+}
+
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
+  databaseURL: FIREBASE_DB_URL,
+});
+
+const db = admin.database();
 
 const API_BASE = "https://v3.football.api-sports.io";
 
@@ -49,22 +77,12 @@ async function apiGet(path) {
   return json.response || [];
 }
 
-function firebaseGetUrl() {
-  return `${FIREBASE_DB_URL.replace(/\/$/, "")}/${DATA_PATH}.json`;
-}
-
-function firebaseGameweekUrl(gw) {
-  return `${FIREBASE_DB_URL.replace(/\/$/, "")}/${DATA_PATH}/gameweeks/${gw}.json`;
-}
-
 async function fetchCurrentState() {
-  const res = await fetch(firebaseGetUrl());
-  if (!res.ok) throw new Error(`Firebase read failed: HTTP ${res.status}`);
-  const json = await res.json();
-  return json || { players: [], managers: [], gameweeks: {} };
+  const snap = await db.ref(DATA_PATH).once("value");
+  return snap.val() || { players: [], managers: [], gameweeks: {} };
 }
 
-// PATCH only merges at this node's immediate children, so this updates
+// update() only merges at this node's immediate children, so this updates
 // individual playerIds inside the gameweek without touching anyone else's
 // existing stats, or any other part of the database (managers, players, etc).
 async function patchGameweek(gw, updates) {
@@ -72,12 +90,7 @@ async function patchGameweek(gw, updates) {
     console.log("No matching player updates to write — skipping save.");
     return;
   }
-  const res = await fetch(firebaseGameweekUrl(gw), {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(updates),
-  });
-  if (!res.ok) throw new Error(`Firebase write failed: HTTP ${res.status}`);
+  await db.ref(`${DATA_PATH}/gameweeks/${gw}`).update(updates);
   console.log(`Wrote stats for ${Object.keys(updates).length} player(s) to gameweek ${gw}.`);
 }
 
@@ -161,7 +174,13 @@ async function main() {
   await patchGameweek(CURRENT_GW, updates);
 }
 
-main().catch((err) => {
-  console.error("Update failed:", err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error("Update failed:", err);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    // Admin SDK keeps a socket open; without this the process can hang
+    // after main() resolves instead of exiting cleanly in CI.
+    admin.app().delete();
+  });
