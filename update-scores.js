@@ -21,7 +21,8 @@
  * --------------------------------------------------------------
  */
 
-const admin = require("firebase-admin");
+const { initializeApp, cert, deleteApp } = require("firebase-admin/app");
+const { getDatabase } = require("firebase-admin/database");
 
 const API_FOOTBALL_KEY = process.env.API_FOOTBALL_KEY;
 const FIREBASE_DB_URL = process.env.FIREBASE_DB_URL;
@@ -49,12 +50,12 @@ try {
   process.exit(1);
 }
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+const app = initializeApp({
+  credential: cert(serviceAccount),
   databaseURL: FIREBASE_DB_URL,
 });
 
-const db = admin.database();
+const db = getDatabase(app);
 
 const API_BASE = "https://v3.football.api-sports.io";
 
@@ -182,5 +183,5 @@ main()
   .finally(() => {
     // Admin SDK keeps a socket open; without this the process can hang
     // after main() resolves instead of exiting cleanly in CI.
-    admin.app().delete();
+    deleteApp(app);
   });
