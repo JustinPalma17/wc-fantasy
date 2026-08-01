@@ -18,7 +18,9 @@ jobs:
           node-version: "24"   # matches what GitHub is already forcing your runs onto
 
       - name: Install dependencies
-        run: npm install firebase-admin
+        run: |
+          rm -f package-lock.json
+          npm install firebase-admin
 
       - name: Run score update script
         run: node update-scores.js
